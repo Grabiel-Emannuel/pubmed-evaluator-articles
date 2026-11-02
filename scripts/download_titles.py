@@ -12,14 +12,15 @@ number of articles to retrieve across all queries.
 
 from __future__ import annotations
 
+import http.client
 import json
 import sys
 import time
-from datetime import date, timedelta
 import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import date, timedelta
 from pathlib import Path
 from tqdm import tqdm
 
@@ -39,7 +40,7 @@ class PubMedClient:
 
     def request(self, endpoint: str, params: dict[str, str]) -> bytes:
         url = f"{EUTILS}/{endpoint}?{urllib.parse.urlencode(params)}"
-        for attempt in range(MAX_RETRIES):
+        for attempt in range(MAX_RETRIES + 1):
             if self.last_request_at is not None:
                 elapsed = time.monotonic() - self.last_request_at
                 if elapsed < MIN_REQUEST_INTERVAL:
@@ -54,16 +55,29 @@ class PubMedClient:
                 with urllib.request.urlopen(request, timeout=60) as response:
                     return response.read()
             except urllib.error.HTTPError as error:
-                if error.code not in {429, 500, 502, 503, 504} or attempt == MAX_RETRIES - 1:
-                    detail = error.read().decode("utf-8", errors="replace").strip()
+                if error.code not in {429, 500, 502, 503, 504} or attempt == MAX_RETRIES:
+                    try:
+                        detail = error.read().decode("utf-8", errors="replace").strip()
+                    except (OSError, http.client.HTTPException):
+                        detail = ""
                     raise RuntimeError(
                         f"Erro HTTP {error.code} do PubMed: {detail or error.reason}"
                     ) from error
-                time.sleep(min(2**attempt, 10))
-            except (urllib.error.URLError, TimeoutError) as error:
-                if attempt == MAX_RETRIES - 1:
+                wait_seconds = min(2**attempt, 30)
+                tqdm.write(
+                    f"HTTP {error.code} do PubMed; nova tentativa "
+                    f"{attempt + 1}/{MAX_RETRIES} em {wait_seconds}s."
+                )
+                time.sleep(wait_seconds)
+            except (OSError, http.client.HTTPException) as error:
+                if attempt == MAX_RETRIES:
                     raise RuntimeError(f"Falha ao consultar o PubMed: {error}") from error
-                time.sleep(min(2**attempt, 10))
+                wait_seconds = min(2**attempt, 30)
+                tqdm.write(
+                    f"Falha de conexão/leitura ({error}); nova tentativa "
+                    f"{attempt + 1}/{MAX_RETRIES} em {wait_seconds}s."
+                )
+                time.sleep(wait_seconds)
         raise RuntimeError("Não foi possível consultar o PubMed.")
 
     def search(self, query: str) -> tuple[int, str, str]:
