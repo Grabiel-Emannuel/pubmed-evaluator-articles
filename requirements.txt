@@ -1,2 +1,10 @@
 tqdm>=4.66
 docxtpl>=0.16.8
+langchain>=1.0
+langgraph>=1.0
+langchain-openai
+langchain-google-genai
+langchain-anthropic
+langchain-ollama
+pydantic
+dotenv
