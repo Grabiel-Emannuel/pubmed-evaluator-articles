@@ -44,6 +44,9 @@ def create_chat(provider: str, model: str, **kwargs: Any) -> BaseChatModel:
             f"Provedor '{provider}' não suportado. Opções: {supported}."
         ) from exc
 
+    if model_provider == "ollama":
+        kwargs["keep_alive"] = "30m"
+
     return init_chat_model(
         model=model.strip(),
         model_provider=model_provider,

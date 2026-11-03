@@ -1,5 +1,5 @@
 {
-  "model": "qwen3.5:0.8b",
+  "model": "gemma4:e2b",
   "prompts": [
     {
       "role": "System",
@@ -8,6 +8,10 @@
     {
       "role": "System",
       "instruction": "Responda somente com a tradução do texto recebido. Não inclua explicações, rótulos, aspas ou formatação."
+    },
+    {
+      "role": "User",
+      "instruction": "{text}"
     }
   ]
 }

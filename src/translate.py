@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, START, StateGraph
 
 from .chat import create_chat
@@ -27,22 +27,6 @@ def _load_configuration(path: str | Path) -> ConfigurationPrompt:
     return ConfigurationPrompt.model_validate_json(
         configuration_path.read_text(encoding="utf-8")
     )
-
-
-def _make_messages(
-    configuration: ConfigurationPrompt, text: str
-) -> list[Any]:
-    role_to_message = {
-        "System": SystemMessage,
-        "User": HumanMessage,
-        "Ai": AIMessage,
-    }
-    messages = [
-        role_to_message[prompt.role](content=prompt.instruction)
-        for prompt in configuration.prompts
-    ]
-    messages.append(HumanMessage(content=text))
-    return messages
 
 
 def _response_text(response: Any) -> str:
@@ -74,13 +58,26 @@ def create_translation_graph(
     )
     chat = create_chat(Settings.PROVIDER, configuration.model, **chat_options)
 
+    role_to_template = {
+        "System": "system",
+        "User": "human",
+        "Ai": "ai",
+    }
+    prompt_template = ChatPromptTemplate.from_messages(
+        [
+            (role_to_template[prompt.role], prompt.instruction)
+            for prompt in configuration.prompts
+        ]
+    )
+    translation_chain = prompt_template | chat
+
     def translate_node(state: TranslationState) -> dict[str, ArticleInformation]:
         article = state["article"]
         translated_title = _response_text(
-            chat.invoke(_make_messages(configuration, article.title))
+            translation_chain.invoke({"text": article.title})
         )
         translated_abstract = _response_text(
-            chat.invoke(_make_messages(configuration, article.abstract))
+            translation_chain.invoke({"text": article.abstract})
         )
         translated_article = ArticleInformation(
             title=translated_title,
