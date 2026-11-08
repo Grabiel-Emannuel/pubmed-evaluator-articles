@@ -9,7 +9,9 @@ from langgraph.graph import END, START, StateGraph
 
 from .chat import create_chat
 from .models import ArticleInformation, ConfigurationPrompt
+from .nllb import NLLBApiError, NLLBClient
 from .settings import Settings
+from .util import ROLE2TEMPLATE
 
 
 DEFAULT_CONFIGURATION_PATH = (
@@ -48,24 +50,24 @@ def _response_text(response: Any) -> str:
 
 def create_translation_graph(
     configuration_path: str | Path = DEFAULT_CONFIGURATION_PATH,
+    *,
+    thinking: bool | None = None,
 ):
-    """Cria e compila um grafo de um nó para traduzir um ArticleInformation."""
+    """Cria um grafo de tradução; ``thinking`` ativa raciocínio no Ollama."""
     configuration = _load_configuration(configuration_path)
     chat_options = (
         {"base_url": Settings.OLLAMA_HOST}
         if Settings.PROVIDER == "ollama" and Settings.OLLAMA_HOST
         else {}
     )
+    if Settings.PROVIDER == "ollama":
+        configured_think = configuration.think if thinking is None else thinking
+        chat_options["think"] = bool(configured_think)
     chat = create_chat(Settings.PROVIDER, configuration.model, **chat_options)
 
-    role_to_template = {
-        "System": "system",
-        "User": "human",
-        "Ai": "ai",
-    }
     prompt_template = ChatPromptTemplate.from_messages(
         [
-            (role_to_template[prompt.role], prompt.instruction)
+            (ROLE2TEMPLATE[prompt.role], prompt.instruction)
             for prompt in configuration.prompts
         ]
     )
@@ -84,6 +86,42 @@ def create_translation_graph(
             abstract=translated_abstract,
         )
         return {"translated_article": translated_article}
+
+    graph = StateGraph(TranslationState)
+    graph.add_node("translate", translate_node)
+    graph.add_edge(START, "translate")
+    graph.add_edge("translate", END)
+    return graph.compile()
+
+
+def create_nllb_translation_graph(client: NLLBClient | None = None):
+    """Cria um grafo LangGraph de um nó usando a API REST NLLB."""
+    nllb_client = client or NLLBClient(
+        Settings.NLLB_API_URL,
+        timeout_seconds=Settings.NLLB_TIMEOUT_SECONDS,
+    )
+
+    def translate_node(state: TranslationState) -> dict[str, ArticleInformation]:
+        article = state["article"]
+        translated_fields: dict[str, str] = {}
+        for field_name in ("title", "abstract"):
+            source_text = getattr(article, field_name)
+            if not source_text or not source_text.strip():
+                translated_fields[field_name] = source_text
+                continue
+            try:
+                translated_fields[field_name] = nllb_client.translate_text(source_text)
+            except NLLBApiError as exc:
+                article_title = article.title[:160]
+                if len(article.title) > 160:
+                    article_title += "…"
+                raise NLLBApiError(
+                    f"Falha no artigo '{article_title}', campo '{field_name}': {exc}"
+                ) from exc
+
+        return {
+            "translated_article": ArticleInformation.model_validate(translated_fields)
+        }
 
     graph = StateGraph(TranslationState)
     graph.add_node("translate", translate_node)

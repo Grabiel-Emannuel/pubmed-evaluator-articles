@@ -225,3 +225,8 @@ __marimo__/
 # Data
 
 data/
+
+# Criteria
+
+criterias/
+!criterias/.gitkeep
